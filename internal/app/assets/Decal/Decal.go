@@ -1,7 +1,6 @@
-package animation
+package decal
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -25,16 +24,14 @@ import (
 	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/taskqueue"
 )
 
-const assetTypeID int32 = 24
-
-var ErrUnauthorized = errors.New("authentication required to access asset")
+// Roblox asset type ID 13 = Decal / Image
+const assetTypeID int32 = 13
 
 func MoveValueToTop[T comparable](arr *atomicarray.AtomicArray[T], value T) {
 	arr.Update(func(currentArray []T) []T {
 		if currentArray[0] == value {
 			return nil
 		}
-
 		for i, v := range currentArray {
 			if v != value {
 				continue
@@ -43,12 +40,10 @@ func MoveValueToTop[T comparable](arr *atomicarray.AtomicArray[T], value T) {
 				currentArray[0], currentArray[1] = currentArray[1], currentArray[0]
 				return currentArray
 			}
-
 			copy(currentArray[1:i+1], currentArray[0:i])
 			currentArray[0] = value
 			return currentArray
 		}
-
 		return nil
 	})
 }
@@ -78,11 +73,11 @@ func Reupload(ctx *context.Context, r *request.Request) {
 	creatorPlaceMap := shardedmap.New[*atomicarray.AtomicArray[int64]]()
 	creatorMutexMap := shardedmap.New[*sync.RWMutex]()
 
-	uploadQueue := taskqueue.New[int64](time.Minute, 3000)                  // wouldnt it be smarter to build in the queue with the api library... YES... but we dont do fixes aroudn here we just add on to the slow degredation of the code base
-	groupGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5) // there doesnt seem to be a limit in minutes on this api endpoint... and its not public and i dont feel like testing the limits sooo hopefully this works
-	userGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)  // I dont even think there is a limit on this like group games but we can be safe... yes i like to spam elipses
+	uploadQueue := taskqueue.New[int64](time.Minute, 500)
+	groupGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)
+	userGameQueue := taskqueue.New[*games.GamesResponse](time.Second*5, 5)
 
-	logger.Println("Reuploading Decals...")
+	logger.Println("Reuploading decals/images...")
 
 	newBatchError := func(amt int, m string, err any) {
 		end := int(idsProcessed.Add(int32(amt)))
@@ -106,7 +101,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 			return
 		}
 
-		uploadHandler, err := ide.NewUploadAnimationHandler(client, assetInfo.Name, "", assetData, groupID)
+		uploadHandler, err := ide.NewUploadDecalHandler(client, assetInfo.Name, "", assetData, groupID)
 		if err != nil {
 			newUploadError("Failed to get upload handler", assetInfo, err)
 			return
@@ -127,9 +122,9 @@ func Reupload(ctx *context.Context, r *request.Request) {
 					}
 
 					switch err {
-					case ide.UploadAnimationErrors.ErrNotLoggedIn:
+					case ide.UploadDecalErrors.ErrNotLoggedIn:
 						clientutils.GetNewCookie(ctx, r, "cookie expired")
-					case ide.UploadAnimationErrors.ErrInappropriateName:
+					case ide.UploadDecalErrors.ErrInappropriateName:
 						assetInfo.Name = fmt.Sprintf("(%s) [Censored]", assetInfo.Name)
 					default:
 						switch err.(type) {
@@ -183,33 +178,32 @@ func Reupload(ctx *context.Context, r *request.Request) {
 			return cache, nil
 		}
 
-		var resp *games.GamesResponse
-		var err error
+		var gamesResp *games.GamesResponse
+		var gamesErr error
 		if creatorType == "Group" {
 			queueRes := <-groupGameQueue.QueueTask(func() (*games.GamesResponse, error) {
 				return games.GroupGames(client, creatorID)
 			})
-			resp = queueRes.Result
-			err = queueRes.Error
+			gamesResp = queueRes.Result
+			gamesErr = queueRes.Error
 		} else {
 			queueRes := <-userGameQueue.QueueTask(func() (*games.GamesResponse, error) {
 				return games.UserGames(client, creatorID)
 			})
-			resp = queueRes.Result
-			err = queueRes.Error
+			gamesResp = queueRes.Result
+			gamesErr = queueRes.Error
 		}
-		if err != nil {
-			return nil, err
+		if gamesErr != nil {
+			return nil, gamesErr
 		}
 
-		ids := make([]int64, 0, len(defaultPlaceIDs)) // we only do len defaultPlaceIds because there may be overlapping, i guess allocating more memory would be fine... idk guys im getting lazy just wait for revamp
-		for _, placeInfo := range resp.Data {         // yes we copying many bytes per iteration, yes i dont care, yes this is another stupid message, yes code iwll get better on revamp :sob:
+		ids := make([]int64, 0, len(defaultPlaceIDs))
+		for _, placeInfo := range gamesResp.Data {
 			rootPlaceID := placeInfo.RootPlace.ID
-
 			if _, exists := defaultPlaceIDsMap[rootPlaceID]; exists {
 				continue
 			}
-			ids = append(ids, rootPlaceID) // we no longer only need 1 valid place id :// ( ͡° ͜ʖ ͡°) yall remember this peak face lmk
+			ids = append(ids, rootPlaceID)
 		}
 		ids = append(ids, defaultPlaceIDs...)
 
@@ -242,7 +236,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 					}
 					if errs[0].Message == "Authentication required to access Asset." {
 						clientutils.GetNewCookie(ctx, r, "cookie expired")
-						return locations, &retry.ContinueRetry{Err: ErrUnauthorized}
+						return locations, &retry.ContinueRetry{Err: assetdelivery.ErrUnauthorized}
 					}
 				}
 
@@ -257,6 +251,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 		placeCache, err := getCreatorPlaceCache(creatorID, creatorType)
 		if err != nil {
 			newBatchError(len(creatorAssets), "Failed to get creator places", err)
+			return
 		}
 
 		assetInfoMap := make(map[int64]*develop.AssetInfo)
@@ -352,7 +347,6 @@ func Reupload(ctx *context.Context, r *request.Request) {
 		var uploadWG sync.WaitGroup
 		for creatorType, creatorAssetMap := range CreatorAssets {
 			uploadWG.Add(len(creatorAssetMap))
-
 			for creatorID, creatorAssets := range creatorAssetMap {
 				go batchUpload(&uploadWG, creatorID, creatorType, creatorAssets)
 			}
@@ -371,7 +365,6 @@ func Reupload(ctx *context.Context, r *request.Request) {
 				batchSize = 50
 			}
 		}
-
 		go batchProcess(&wg, <-task, batchSize)
 	}
 	wg.Wait()
