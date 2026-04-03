@@ -236,7 +236,7 @@ func Reupload(ctx *context.Context, r *request.Request) {
 					}
 					if errs[0].Message == "Authentication required to access Asset." {
 						clientutils.GetNewCookie(ctx, r, "cookie expired")
-						return locations, &retry.ContinueRetry{Err: assetdelivery.ErrUnauthorized}
+						return locations, &retry.ContinueRetry{Err: errors.New("unauthorized")}
 					}
 				}
 
