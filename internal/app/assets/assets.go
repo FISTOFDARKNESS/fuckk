@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/app/assets/animation"
+	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/app/assets/decal"
 	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/app/assets/mesh"
 	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/app/assets/shared/clientutils"
 	"github.com/FISTOFDARKNESS/Asset-Reuploader/internal/app/assets/shared/permissions"
@@ -18,6 +19,7 @@ import (
 
 var assetModules = map[string]func(ctx *context.Context, r *request.Request){
 	"Animation": animation.Reupload,
+	"Decal":     decal.Reupload,
 	"Mesh":      mesh.Reupload,
 	"Sound":     sound.Reupload,
 }

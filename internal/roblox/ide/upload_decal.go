@@ -23,35 +23,42 @@ var UploadDecalErrors = struct {
 }
 
 func newUploadDecalURL(groupID int64, name, description string) string {
-	endpoint := fmt.Sprintf(
-		"https://data.roblox.com/ide/publish/UploadNewAsset?assetTypeName=Decal&name=%s&description=%s",
+	url := fmt.Sprintf("https://data.roblox.com/ide/publish/UploadNewDecal?assetTypeName=Decal&name=%s&description=%s"+queryStuff,
 		url.QueryEscape(name),
 		url.QueryEscape(description),
 	)
 	if groupID > 0 {
-		endpoint += fmt.Sprintf("&groupId=%d", groupID)
+		url += fmt.Sprintf("&groupId=%d", groupID)
 	}
-	return endpoint
+
+	return url
 }
 
-func newUploadDecalRequest(groupID int64, name, description string, data *bytes.Buffer) (*http.Request, error) {
-	endpoint := newUploadDecalURL(groupID, name, description)
-	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(data.Bytes()))
+func newUploadDecalRequest(
+	groupID int64,
+	name,
+	description string,
+	data *bytes.Buffer,
+) (*http.Request, error) {
+	url := newUploadDecalURL(groupID, name, description)
+	req, err := http.NewRequest("POST", url, data)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "RobloxStudio/WinInet")
-	req.Header.Set("Content-Type", "image/png")
+
 	return req, nil
 }
 
 func NewUploadDecalHandler(
 	c *roblox.Client,
-	name, description string,
+	name,
+	description string,
 	data *bytes.Buffer,
-	groupID int64,
+	groupID ...int64,
 ) (func() (int64, error), error) {
-	req, err := newUploadDecalRequest(groupID, name, description, data)
+	group := groupID[0]
+	req, err := newUploadDecalRequest(group, name, description, data)
 	if err != nil {
 		return func() (int64, error) { return 0, nil }, err
 	}
@@ -80,21 +87,23 @@ func NewUploadDecalHandler(
 			if err != nil {
 				return 0, err
 			}
+
 			return id, nil
 		case http.StatusForbidden:
-			strBody := string(body)
-			if strBody == "NotLoggedIn" {
+			if strBody := string(body); strBody == "NotLoggedIn" {
 				return 0, UploadDecalErrors.ErrNotLoggedIn
 			} else if strBody == "XSRF Token Validation Failed" {
 				c.SetToken(resp.Header.Get("x-csrf-token"))
 				return 0, UploadDecalErrors.ErrTokenInvalid
 			}
+
 			return 0, errors.New(resp.Status)
 		case http.StatusUnprocessableEntity:
 			if string(body) == "Inappropriate name or description." {
-				req, _ = newUploadDecalRequest(groupID, "[Censored]", description, data)
+				req, _ = newUploadDecalRequest(group, "[Censored]", description, data)
 				return 0, UploadDecalErrors.ErrInappropriateName
 			}
+
 			return 0, errors.New(resp.Status)
 		default:
 			return 0, errors.New(resp.Status)

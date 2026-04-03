@@ -8,6 +8,7 @@ local UiLibrary = require("./UiLibrary")
 local currentVersion = script.Parent.Parent.Version.Value
 local tabOrder = {
     "Animation",
+    "Decal",
     "Sound",
     "Mesh",
     "Replace",
